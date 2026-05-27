@@ -1,0 +1,2705 @@
+﻿<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Thesaurus - Gabriel Morin & Nicholas Birla-Eliade</title>
+
+    <link rel="stylesheet" type="text/css" href="StyleLabo10.css" />
+
+    <script type="text/javascript" src="WebGl.js"></script>
+    <script type="text/javascript" src="ShaderCouleurs.js"></script>
+    <script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+    <script type="text/javascript" src="Transformations.js"></script>
+    <script type="text/javascript" src="Camera.js"></script>
+    <script type="text/javascript" src="noise.js"></script>
+
+    <style>
+        body {
+            background-color: rgb(18, 18, 18);
+            margin: 0; /* optional, removes default white edges */
+            color: white; /* optional, makes text readable */
+        }
+    </style>
+</head>
+
+<body onload="demarrer()">
+    <header class="sTexteCentre sLargeurDiv sEntete">
+        <p>
+            <span class="sTitreApp">Thesaurus <br /></span>
+            par <span class="sAuteurApp">Gabriel Morin & Nicholas Birla-Eliade</span>
+        </p>
+    </header>
+
+    <main class="sLargeurDiv sCorps">
+        <canvas id="monCanvas" width="1000" height="720">
+            Votre navigateur ne supporte pas la balise canvas
+        </canvas>
+        <div id="hud" style="
+            position:absolute;
+            top:80px;
+            left:30px;
+            color:white;
+            font-family: monospace;
+            font-size:16px;
+            text-shadow:2px 2px 4px black;
+            pointer-events:none;
+        ">
+            <div id="hudFps"></div>
+            <div id="hudNiveau"></div>
+            <div id="hudScore"></div>
+            <div id="hudOuvreurs"></div>
+            <div id="hudTemps"></div>
+        </div>
+        <div id="messageTermine" style="
+            position:absolute;
+            top: 400px;
+            left: 400px;
+            color:white;
+            font-family: monospace;
+            font-size:50px;
+            text-shadow:2px 2px 4px black;
+            pointer-events:none;
+            text-align: center;
+        ">
+            
+        </div>
+        <label>
+            <input type="checkbox" id="debugToggle">
+            Debug
+        </label>
+    </main>
+
+    <footer class="sLargeurDiv sPiedDePage">
+        <p>
+            <a href="http://www.cgodin.qc.ca">
+                <img src="logoCGG.jpg" alt="logoCGG" />
+            </a>
+            <a href="http://www.cgodin.qc.ca/programme/techniques-informatique/">
+                Département d'informatique du Cégep Gérald-Godin
+            </a>
+            <br />&copy; 2026
+        </p>
+    </footer>
+
+    <script type="text/javascript">
+
+        var noise = new Noise(0);
+        noise.seed(0);
+
+        // CONSTANTES DU DÉDALE
+
+        var TAILLE_DEDALE = 31;
+        var HAUTEUR_MUR = 1.5;
+        var HAUTEUR_PLAFOND = 1.8;
+        var HAUTEUR_CAMERA = 1;
+
+        // (si on change a un tableau de numéro)
+
+        var CELLULE_COULOIR = 0;
+        var CELLULE_MUR_NON_OUVRABLE = 1;
+        var CELLULE_MUR_OUVRABLE = 2;
+        var CELLULE_ENCLOS = 3;
+
+        // CONSTANTES DE COULEURS  [R, G, B, A]
+
+        var COULEUR_PLANCHER_COULOIR = [0.2, 0.2, 0.3, 1.0];
+        var COULEUR_PLANCHER_ENCLOS = [2.0, 0.7, 0.0, 1.0];
+        var COULEUR_PLAFOND = [0.05, 0.05, 0.15, 1.0];
+        var COULEUR_MUR_NON_OUVRABLE = [0.2, 0.5, 0.2, 1.0];  // vert
+        var COULEUR_MUR_OUVRABLE = [1.0, 0.0, 0.1, 1.0];  // rouge
+
+        var COULEUR_FLECHES_CONE = [1.0, 0.5, 0.0, 1.0];
+        var COULEUR_FLECHES_CYLINDRE = [0.7, 0.3, 0.0, 1.0];
+        var COULEUR_TELETRANSPORTEUR = [0.2, 0.7, 1.0, 1.0];
+        var COULEUR_TELERECEPTEUR = [0.3, 0.4, 0.9, 1.0];
+        var COULEUR_TRESOR_BOITE = [1.0, 0.7, 0.1, 1.0];
+        var COULEUR_TRESOR_COUVERCLE = [0.8, 0.6, 0.2, 1.0];
+        var COULEUR_OMBRE = [0.0, 0.0, 0.0, 1.0];
+
+        var COULEUR_TRESOR_COUVERCLE = [0.8, 0.6, 0.2, 1.0];
+
+
+        var sonMort = new Audio("mort.mp3");
+        var sonTeleporte = new Audio("prochain.wav");
+        var sonTresor = new Audio("orTombe.mp3");
+        var sonGagne = new Audio("gagne.mp3");
+        var sonBrise = new Audio("4.mp3");
+        var sonPerdre = new Audio("perdu.mp3");
+        var sonOuvre = new Audio("open.ogg");
+        var sonFerme = new Audio("close.ogg");
+        var sonFermeForce = new Audio("closeForce.mp3");
+        var sonErreur = new Audio('error.mp3');
+        var sonTue = new Audio("gun.wav");
+        var sonStart = new Audio("respawn3.wav");
+        sonStart.volume = 0.3;
+        var sonExplosion = new Audio('explosion.mp3');
+        var sonsPas = [];
+        var dernierSonsPas = [];
+
+        for (let i = 0; i < 19; i++) {
+            sonsPas.push(new Audio("pas/" + i.toString() + ".mp3"));
+        }
+
+        function jouerSonPas(){
+            let index = Math.floor(Math.random() * 18.9);
+            while(dernierSonsPas.includes(index)){
+                index = Math.floor(Math.random() * 18.9);
+            }
+            dernierSonsPas.push(index);
+            sonsPas[index].play();
+            if(dernierSonsPas.length > 10){ dernierSonsPas.shift(); }
+        }
+
+        var sonAmbIdle = new Audio("idle.mp3");
+        sonAmbIdle.loop = true;
+        sonAmbIdle.play();
+        var sonAmbActive = new Audio("active.mp3");
+        sonAmbActive.loop = true;
+        sonAmbActive.volume = 0;
+        sonAmbActive.play();
+        var sonAmbClose = new Audio("close.mp3");
+        sonAmbClose.loop = true;
+
+        var velocite = 0;
+
+        var noiseTemps = 0;
+
+
+        var pasCooldown = 0.5;
+        var pasPied = 1;
+        var sprint = 1;
+
+        var dernierPosX;
+        var dernierPosZ;
+
+
+        var tabEnnemis = [];
+
+
+        // MATRICE DU DÉDALE 31x31
+        // G=mur non-ouvrable, R=mur ouvrable, .=couloir, E=enclos
+
+        var mazeRaw = [
+            "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+            "G..............R..............G",
+            "G.RRRRRR.RRRRR.R.RRRRR.RRRRRR.G",
+            "G........R...R.R.R...R........G",
+            "GRRRRRRR.RR.RR.R.RR.RR.RRRRRRRG",
+            "G.............................G",
+            "GRRR.RRR.R.RRR.R.RRR.R.RRR.RRRG",
+            "G........R.R.R.R.R.R.R........G",
+            "GRRR.RRR.R.R.R.R.R.R.R.RRR.RRRG",
+            "G........R.R.R.R.R.R.R........G",
+            "G.RRRRRR.R.R.R.R.R.R.R.RRRRRR.G",
+            "G......R.RRR.R.R.R.RRR.R......G",
+            "GRRRRR.R...............R.RRRRRG",
+            "G......R.RRR.GG.GG.RRR.R......G",
+            "G.RRRRRR.R.R.GEEEG.R.R.RRRRRR.G",
+            "G........R.R.GEEEG.R.R........G",
+            "GRRRRRRR.R.R.GEEEG.R.R.RRRRRRRG",
+            "G........R.R.GGGGG.R.R........G",
+            "G.RRRRRR.R.R.......R.R.RRRRRR.G",
+            "G.R......R.RRRR.RRRR.R......R.G",
+            "G.R.RRRR.R....R.R....R.RRRR.R.G",
+            "G.R.R....R.R..R.R..R.R....R.R.G",
+            "G.R.RRRR.R.R.RR.RR.R.R.RRRR.R.G",
+            "G......R.R...R...R...R.R......G",
+            "G.RRRR.R.R.RRR.R.RRR.R.R.RRRR.G",
+            "G......R...R.......R...R......G",
+            "G.R.RR.R.RRR.RR.RR.RRR.R.RR.R.G",
+            "G.R.R..R.R...R...R...R.R..R.R.G",
+            "GRR.RRRR.R.RRRRRRRRR.R.RRRR.RRG",
+            "G.............................G",
+            "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+        ];
+
+
+        // POSITIONS DES OBJETS DU NIVEAU
+
+        var posTresor = [];
+
+        var tabPosObjets = [];
+        var tabPosTeleporteurs = [];
+        var tabPosTelecepteurs = [];
+        var tabPosFleches = [];
+
+        var fps = 0;
+        var dernierFps = 0;
+        var compteFrameFps = 0;
+        var compteTeleporte;
+
+        // ÉTAT DU JEU (variables globales)
+
+        // Durée d'un niveau en secondes
+        var DUREE_NIVEAU = 60;
+
+        var niveauActuel = 1;
+        var niveauPrecedant = 0;
+        var score = 300;
+        var tempsRestant = DUREE_NIVEAU;
+        var ouvreurs = 4;
+        var angleCamera = 0;
+        var joueurSorti = false;
+        var modeAerien = false;
+        var teleporteCooldown = 0;
+        var partieTerminee = false;
+        var derniereTimestamp = 0;
+        var touchesEnfoncees = {};
+        var triche = false;
+        var debugCull = false;
+        var debugMode = false;
+
+        var cooldownVueAriennePenlite = 1;
+
+        var tabCamera = null;
+
+
+        // Nombre d'objets par niveau (index 0 = niveau 1)
+        var OUVREURS_PAR_NIVEAU = [4, 4, 3, 3, 2, 2, 1, 1, 0, 0];
+        var FLECHES_PAR_NIVEAU = [18, 16, 14, 12, 10, 8, 6, 4, 2, 0];
+        var TELEPORTEURS_PAR_NIVEAU = [0, 1, 1, 2, 2, 3, 3, 4, 4, 5];
+        var TELECEPTEURS_PAR_NIVEAU = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+        // Vitesses de déplacement
+        var VITESSE_DEPLACEMENT = 2.5;
+        var VITESSE_ROTATION = 1.8;
+        var RAYON_COLLISION = 0.25;
+        var DIST_TEST_COLLISION = 0.2;
+
+
+        var objScene3D = null;
+        var objgl = null;
+        var objProgShaders = null;
+
+        // TEXTURES
+        var textures = {};
+        var texturesChargees = 0;
+        var texturesTotal = 5;
+
+        function chargerTexture(objgl, nomFichier, cle) {
+            var tex = objgl.createTexture();
+            tex.loaded = false;
+            var img = new Image();
+            img.onload = function () {
+                objgl.bindTexture(objgl.TEXTURE_2D, tex);
+                objgl.texImage2D(objgl.TEXTURE_2D, 0, objgl.RGBA, objgl.RGBA, objgl.UNSIGNED_BYTE, img);
+                // Pas de mipmap ni REPEAT pour supporter les textures non-puissance-de-2
+                objgl.texParameteri(objgl.TEXTURE_2D, objgl.TEXTURE_WRAP_S, objgl.CLAMP_TO_EDGE);
+                objgl.texParameteri(objgl.TEXTURE_2D, objgl.TEXTURE_WRAP_T, objgl.CLAMP_TO_EDGE);
+                objgl.texParameteri(objgl.TEXTURE_2D, objgl.TEXTURE_MIN_FILTER, objgl.LINEAR);
+                objgl.texParameteri(objgl.TEXTURE_2D, objgl.TEXTURE_MAG_FILTER, objgl.LINEAR);
+                objgl.bindTexture(objgl.TEXTURE_2D, null);
+                tex.loaded = true;
+                texturesChargees++;
+            };
+            img.src = nomFichier;
+            textures[cle] = tex;
+        }
+
+
+
+
+
+        async function chargerModelOBJ(objgl, cheminOBJ, textureKey) {
+            const texte = await fetch(cheminOBJ).then(r => r.text());
+
+            const rawVertices = [];
+            const rawUVs = [];
+            const finalVertices = [];
+            const finalUVs = [];
+            const finalColors = [];
+
+            const lignes = texte.split('\n');
+            for (let ligne of lignes) {
+                ligne = ligne.trim();
+                if (ligne.startsWith('v ')) {
+                    const p = ligne.split(/\s+/);
+                    rawVertices.push([parseFloat(p[1]), parseFloat(p[2]), parseFloat(p[3])]);
+                } else if (ligne.startsWith('vt ')) {
+                    const p = ligne.split(/\s+/);
+                    rawUVs.push([parseFloat(p[1]), 1.0 - parseFloat(p[2])]); // Flip V pour WebGL
+                } else if (ligne.startsWith('f ')) {
+                    const parts = ligne.split(/\s+/).slice(1);
+                    const triangles = parts.length === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2];
+
+                    for (let i of triangles) {
+                        const refs = parts[i].split('/');
+                        const vIndex = parseInt(refs[0]) - 1;
+                        const uvIndex = parseInt(refs[1]) - 1;
+
+                        const v = rawVertices[vIndex];
+                        const uv = rawUVs[uvIndex];
+
+                        finalVertices.push(v[0], v[1], v[2]);
+                        finalUVs.push(uv[0], uv[1]);
+                        finalColors.push(1, 1, 1, 1); // Blanc pour laisser la texture s'afficher
+                    }
+                }
+            }
+
+            // Création des buffers GPU
+            const vBuf = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, vBuf);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(finalVertices), objgl.STATIC_DRAW);
+            vBuf.typeDessin = objgl.TRIANGLES;
+
+            const uvBuf = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, uvBuf);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(finalUVs), objgl.STATIC_DRAW);
+
+            const cBuf = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, cBuf);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(finalColors), objgl.STATIC_DRAW);
+
+            // On retourne l'objet de données partagées (sans transformations)
+            return {
+                vertex: [vBuf],
+                couleurs: [cBuf],
+                uvCoords: [uvBuf],
+                textureKeys: [textureKey || null],
+                maillage: null
+            };
+        }
+
+
+        function spawnEnnemi(nom, x, z){
+            obj = new Object();
+            obj.nom = nom;
+            obj.x = x;
+            obj.y = 0;
+            obj.z = z;
+            obj.velociteTombe = 0;
+            obj.rot = 0;
+            obj.mort = false;
+            obj.pause = false;
+
+            tabEnnemis.push(obj);
+            objScene3D.tabEnnemis.push(creerModel(selectModel(nom), [x, 0, z], [0, 0, 0], selectModelScale(nom)));
+        }
+
+
+
+        function selectModel(nom){
+            switch(nom){
+                case 'freddy': return objFreddy;
+                default: return undefined;
+            }
+        }
+
+        function selectModelScale(nom){
+            switch(nom){
+                case 'freddy': return [4.20, 4.20, 4.20];
+                default: return [6.9, 6.9, 6.9];
+            }
+        }
+
+
+
+        function despawnEnnemi(index){
+            tabEnnemis.splice(index, 1);
+            objScene3D.tabEnnemis.splice(index, 1);
+        }
+
+        function getLookAtRotation(x1, y1, x2, y2) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+
+            // Convert radians to degrees
+            let angle = Math.atan2(dx, dy) * (180 / Math.PI) - 180;
+
+            // Normalize to 0–360
+            angle = (angle + 360) % 360;
+
+            return angle;
+        }
+
+
+        function tournerVers(rotActuel, rotDesire, vitesseRotation, dt) {
+            // Shortest angle difference (-180 to +180)
+            let diff = ((rotDesire - rotActuel + 540) % 360) - 180;
+
+            // If close enough, snap to target
+            if (Math.abs(diff) <= vitesseRotation * dt) {
+                return rotDesire;
+            }
+
+            // Rotate in shortest direction
+            if (diff > 0) {
+                rotActuel += vitesseRotation * dt;
+            } else {
+                rotActuel -= vitesseRotation * dt;
+            }
+
+            // Keep between 0–360
+            rotActuel = (rotActuel + 360) % 360;
+
+            return rotActuel;
+        }
+
+
+        function ennemiVisibleParJoueur(x, z, fov) {
+            let px = getPositionCameraX(tabCamera);
+            let pz = getPositionCameraZ(tabCamera);
+
+            // Direction from player to enemy
+            let dx = x - px;
+            let dz = z - pz;
+
+            let dist = Math.sqrt(dx * dx + dz * dz);
+
+            // Frustum
+
+            let dirX = dx / dist;
+            let dirZ = dz / dist;
+
+            let forwardX = Math.sin(angleCamera);
+            let forwardZ = Math.cos(angleCamera);
+
+            let dot = dirX * forwardX + dirZ * forwardZ;
+
+            // Same FOV as your renderer
+            let seuil = Math.cos(Math.PI / fov);
+
+            if (dot < seuil) {
+                return false;
+            }
+
+            // Line of sight
+
+            let stepSize = 0.1;
+
+            let stepX = dirX * stepSize;
+            let stepZ = dirZ * stepSize;
+
+            let rayX = px;
+            let rayZ = pz;
+
+            let maxSteps = Math.floor(dist / stepSize);
+
+            for (let i = 0; i < maxSteps; i++) {
+
+                rayX += stepX;
+                rayZ += stepZ;
+
+                let cx = Math.floor(rayX);
+                let cz = Math.floor(rayZ);
+
+                // Outside map = blocked
+                if (
+                    cx < 0 || cx >= TAILLE_DEDALE ||
+                    cz < 0 || cz >= TAILLE_DEDALE
+                ) {
+                    return false;
+                }
+
+                // Solid wall
+                if (tab_lab[cz][cx] === CELLULE_MUR_NON_OUVRABLE) {
+                    return false;
+                }
+
+                // Door wall
+                if (tab_lab[cz][cx] === CELLULE_MUR_OUVRABLE) {
+
+                    let murBloque = true;
+
+                    for (let j = 0; j < objScene3D.tabMursOuvrables.length; j++) {
+
+                        let m = objScene3D.tabMursOuvrables[j];
+
+                        if (m.ligne === cz && m.col === cx) {
+                            murBloque = !m.ouvert;
+                            break;
+                        }
+                    }
+
+                    if (murBloque) {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+
+        function deplacerEnnemi(x, z, objScene3D, index) {
+            let px = x;
+            let pz = z;
+
+            let radius = 0.3;
+
+            function solide(lig, col) {
+                return estMur(lig, col, objScene3D);
+            }
+
+            // Sur le X
+            let testX = px;
+
+            let left = Math.floor(testX - radius);
+            let right = Math.floor(testX + radius);
+            let top = Math.floor(pz);
+            let bottom = Math.floor(pz);
+
+            if (solide(bottom, right) || solide(top, right)) {
+                testX = right - radius - 0.0001;
+            }
+
+            if (solide(bottom, left) || solide(top, left)) {
+                testX = left + 1 + radius + 0.0001;
+            }
+
+            px = testX;
+
+            // Sur le Z
+            let testZ = pz;
+
+            left = Math.floor(px);
+            right = Math.floor(px);
+            top = Math.floor(testZ - radius);
+            bottom = Math.floor(testZ + radius);
+
+            if (solide(bottom, left) || solide(bottom, right)) {
+                testZ = bottom - radius - 0.0001;
+            }
+
+            if (solide(top, left) || solide(top, right)) {
+                testZ = top + 1 + radius + 0.0001;
+            }
+
+            pz = testZ;
+
+            // Corner Collision
+            let cornerX = Math.round(px);
+            let cornerZ = Math.round(pz);
+
+            let cornerSolid =
+                solide(cornerZ - 1, cornerX - 1) ||
+                solide(cornerZ - 1, cornerX) ||
+                solide(cornerZ, cornerX - 1) ||
+                solide(cornerZ, cornerX);
+
+            if (cornerSolid) {
+
+                // Vector from corner to player
+                let vx = px - cornerX;
+                let vz = pz - cornerZ;
+
+                let dist = Math.sqrt(vx * vx + vz * vz);
+
+                // If inside collision radius
+                if (dist < radius) {
+
+                    // Avoid divide-by-zero
+                    if (dist < 0.0001) {
+                        vx = 1;
+                        vz = 0;
+                        dist = 1;
+                    }
+
+                    // Normalize
+                    vx /= dist;
+                    vz /= dist;
+
+                    // Push player exactly to radius
+                    px = cornerX + vx * radius;
+                    pz = cornerZ + vz * radius;
+                }
+            }
+            return [px, pz];
+        }
+
+
+        function mettreAJourEnnemi(index, dt, joueurX, joueurZ){
+            let ennemi = tabEnnemis[index];
+            if(ennemi.mort){
+                tabEnnemis[index].velociteTombe += dt;
+                if(tabEnnemis[index].velociteTombe > 10){
+                    despawnEnnemi(index);
+                    return;
+                }
+            }
+            let x = ennemi.x;
+            let y = ennemi.y - ennemi.velociteTombe;
+            let z = ennemi.z;
+            let rot = ennemi.rot;
+            let nom = ennemi.nom;
+            let diffX = joueurX - x;
+            let diffZ = joueurZ - z;
+            let dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
+            if(dist < 0.25 && !ennemi.mort){
+                debuterJeu(true);
+                sonMort.play();
+                return;
+            }
+            let pause = false;
+            if(nom == "freddy" && niveauActuel < 5){
+                pause = ennemiVisibleParJoueur(x, z, 2.6);
+            }
+            else if(nom == "foxy"){
+                pause = ennemiVisibleParJoueur(x, z, 8);
+            }
+            if(!pause){
+                let rotDesire = getLookAtRotation(joueurX, joueurZ, x, z);
+                rot = tournerVers(rot, rotDesire, 150 / (dist * 2 + 2), dt);
+
+                // Avancer vers joueur
+                let dirX = diffX / dist;
+                let dirZ = diffZ / dist;
+
+                let vitesse = Math.min(4, 0.5 + dist * 0.4) / 2;
+
+                x += dirX * vitesse * dt;
+                z += dirZ * vitesse * dt;
+
+                posValides = deplacerEnnemi(x, z, objScene3D, index);
+                x = posValides[0];
+                z = posValides[1];
+            }
+            tabEnnemis[index].x = x;
+            tabEnnemis[index].y = y;
+            tabEnnemis[index].z = z;
+            tabEnnemis[index].rot = rot;
+            objScene3D.tabEnnemis[index] = creerModel(selectModel(nom), [x, y, z], [0, rot, 0], selectModelScale(nom));
+        }
+
+
+
+        var tab_lab = [];
+        function debuterJeu(pasTrouve = false) {
+            // reset game state
+
+            if(niveauActuel < 0){ // Arrete le jeu de loop indefinitivement
+                return
+            }
+            if (niveauActuel > 10) {
+                partieTerminee = true;
+                document.getElementById("messageTermine").innerText = "Jeu Gagné!";
+                sonGagne.play();
+                niveauActuel = -1;
+                return;
+            }
+            else if (score < 200 && pasTrouve) {
+                partieTerminee = true;
+                document.getElementById("messageTermine").innerText = "Jeu Perdu!";
+                sonPerdre.play();
+                niveauActuel = -1;
+                return;
+            }
+            else {
+                partieTerminee = false;
+            }
+
+            if(pasTrouve){ score -= 200};
+
+            sonStart.pause();
+            sonStart.currentTime = 0;
+            sonStart.play();
+
+            tempsRestant = DUREE_NIVEAU;
+            joueurSorti = false;
+            modeAerien = false;
+            teleporteCooldown = 0;
+            compteTeleporte = 0;
+            angleCamera = 0;
+            ouvreurs = OUVREURS_PAR_NIVEAU[niveauActuel - 1];
+
+            tab_lab = [];
+            for (var r = 0; r < TAILLE_DEDALE; r++) {
+                tab_lab[r] = [];
+                for (var c = 0; c < TAILLE_DEDALE; c++) {
+                    var ch = (mazeRaw[r] && mazeRaw[r][c]) || 'G';
+                    if (ch === 'G') tab_lab[r][c] = CELLULE_MUR_NON_OUVRABLE;
+                    else if (ch === 'R') tab_lab[r][c] = CELLULE_MUR_OUVRABLE;
+                    else if (ch === 'E') tab_lab[r][c] = CELLULE_ENCLOS;
+                    else tab_lab[r][c] = CELLULE_COULOIR;
+                }
+            }
+
+            if (niveauActuel !== niveauPrecedant) {
+                niveauPrecedant = niveauActuel;
+
+                tabPosObjets = [];
+                tabPosTelecepteurs = [];
+                tabPosTeleporteurs = [];
+                tabPosFleches = [];
+
+                posTresor = [Math.floor(Math.random() * 31), Math.floor(Math.random() * 31)];
+
+                while (tab_lab[posTresor[0]][posTresor[1]] != CELLULE_COULOIR) {
+                    posTresor = [Math.floor(Math.random() * 31), Math.floor(Math.random() * 31)];
+                    tabPosObjets.push(posTresor);
+                }
+
+                // Teleporteurs
+                for (var i = 0; i < Math.floor(niveauActuel / 2);) {
+                //for(var i = 0; i < 15;){
+                    let posTemp = [Math.floor(Math.random() * 31), Math.floor(Math.random() * 31)];
+                    if (tab_lab[posTemp[0]][posTemp[1]] == CELLULE_COULOIR && !tabPosObjets.some(pos => pos[0] === posTemp[0] && pos[1] === posTemp[1])) {
+                        tabPosTeleporteurs.push(posTemp);
+                        tabPosObjets.push(posTemp);
+                        i++
+                    }
+                }
+
+                // Telecepteurs
+                for (var i = 0; i < niveauActuel - 1;) {
+                //for(var i = 0; i < 15;){
+                    let posTemp = [Math.floor(Math.random() * 31), Math.floor(Math.random() * 31)];
+                    if (tab_lab[posTemp[0]][posTemp[1]] == CELLULE_COULOIR && !tabPosObjets.some(pos => pos[0] === posTemp[0] && pos[1] === posTemp[1])) {
+                        tabPosTelecepteurs.push(posTemp);
+                        tabPosObjets.push(posTemp);
+                        i++;
+                    }
+                }
+
+                // Fleches
+                for (var i = 0; i < 20 - niveauActuel * 2;) {
+                    let posTemp = [Math.floor(Math.random() * 31), Math.floor(Math.random() * 31)];
+                    if (tab_lab[posTemp[0]][posTemp[1]] == CELLULE_COULOIR && !tabPosObjets.some(pos => pos[0] === posTemp[0] && pos[1] === posTemp[1])) {
+                        tabPosFleches.push(posTemp);
+                        tabPosObjets.push(posTemp);
+                        i++;
+                    }
+                }
+            }
+
+            debuterScene3D(objgl);
+
+            if(debugMode){
+                spawnEnnemi('freddy', Math.floor(Math.random() * 31), Math.floor(Math.random() * 31));
+            }
+
+            // reset camera
+            debuterCamera(TAILLE_DEDALE / 2, TAILLE_DEDALE / 2);
+
+            // HUD update
+            updateHUD();
+        }
+
+        const debugToggle = document.getElementById("debugToggle");
+
+        debugToggle.addEventListener("change", function () {
+            debugMode = debugToggle.checked;
+            console.log("debug");
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Shift") {
+                e.preventDefault();
+                if(debugMode){
+                    sprint = 1.5;
+                }
+            }
+        });
+
+        document.addEventListener("keyup", function (e) {
+            if (e.key === "Shift") {
+                e.preventDefault();
+                sprint = 1;
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "CapsLock") {
+                e.preventDefault();
+                if(debugMode){
+                    sprint = 3;
+                }
+            }
+        });
+
+        document.addEventListener("keyup", function (e) {
+            if (e.key === "CapsLock") {
+                e.preventDefault();
+                sprint = 1;
+            }
+        });
+        
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Control") {
+                e.preventDefault();
+                if(debugMode){
+                    sprint = 0.25;
+                }
+            }
+        });
+
+        document.addEventListener("keyup", function (e) {
+            if (e.key === "Control") {
+                e.preventDefault();
+                sprint = 1;
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F1") {
+                e.preventDefault();
+                if(debugMode){
+                    ouvreurs += 1;
+                    updateHUD();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F2") {
+                e.preventDefault();
+                if(debugMode){
+                    debugCull = !debugCull;
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F3") {
+                e.preventDefault();
+                if(debugMode){
+                    tempsRestant -= 5;
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F4") {
+                e.preventDefault();
+                if(debugMode){
+                    tempsRestant += 5;
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F5") {
+                e.preventDefault();
+                if(debugMode){
+                    score -= 50;
+                    updateHUD();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F6") {
+                e.preventDefault();
+                if(debugMode){
+                    score += 50;
+                    updateHUD();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F7") {
+                e.preventDefault();
+                if(debugMode){
+                    score -= 50;
+                    if(score < 0) score = 0;
+                    ouvreurs -= 1;
+                    if(ouvreurs < 0) ouvreurs = 0;
+                    tempsRestant -= 5;
+                    updateHUD();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F8") {
+                e.preventDefault();
+                if(debugMode){
+                    score += 50;
+                    tempsRestant += 5;
+                    ouvreurs += 1;
+                    updateHUD();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F9") {
+                e.preventDefault();
+                if(debugMode){
+                    let px = Math.round(getPositionCameraX(tabCamera));
+                    let pz = Math.round(getPositionCameraZ(tabCamera));
+                    for(i = -7; i < 8; i++){
+                        for(k = -7; k < 8; k++){
+                            try{
+                                tab_lab[pz + i][px + k] = CELLULE_COULOIR;
+                            }
+                            catch(err){}
+                        }
+                    }
+                    reloadMurs();
+                    sonExplosion.pause();
+                    sonExplosion.currentTime = 0;
+                    sonExplosion.play();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.code === "F10") {
+                e.preventDefault();
+                if(debugMode){
+                    despawnEnnemi(0);
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e){
+            if (e.code === "KeyF" && debugMode) {
+                e.preventDefault();
+                spawnEnnemi('freddy', Math.floor(Math.random() * 31), Math.floor(Math.random() * 31));
+            }
+        })
+
+        document.addEventListener("keydown", function (e){
+            if (e.code === "F10") {
+                e.preventDefault();
+                try{
+                    killEnnemi(0);
+                }
+                catch(err){}
+            }
+        })
+
+
+        function updateHUD() {
+            if(niveauActuel >= 0){ // On ne montre jamais le score interne -1
+                document.getElementById("hudNiveau").innerText = "Niveau: " + niveauActuel;
+            }
+            document.getElementById("hudScore").innerText = "Score: " + score;
+            if(ouvreurs !== undefined){
+                document.getElementById("hudOuvreurs").innerText = "Ouvreurs: " + ouvreurs;
+            }
+        }
+
+
+        function chargerTexturesAO(objgl, chemin, base, extension) {
+            // Original
+            chargerTexture(objgl, chemin + base + "_" + extension, base + "_");
+
+            // variations
+            let sufs = ['none', 'left', 'right', 'both'];
+
+            for (let s of sufs) {
+                let name = base + '_' + s;
+                chargerTexture(objgl, chemin + name + extension, name);
+            }
+        }
+
+        var objFreddy;
+
+
+        async function demarrer() {
+            objCanvas = document.getElementById('monCanvas');
+            objgl = initWebGL(objCanvas);
+            objProgShaders = initShaders(objgl);
+
+            // Charger les textures
+            chargerTexturesAO(objgl, 'breakable/', 'breakable', '.jpg');
+            chargerTexturesAO(objgl, 'unbreakable/', 'unbreakable', '.jpg');
+
+            chargerTexture(objgl, 'freddy.png', 'freddy');
+
+            objFreddy = await chargerModelOBJ(objgl, "freddy.obj", "freddy");
+
+            chargerTexture(objgl, 'floor.jpg', 'floor_');
+            chargerTexture(objgl, 'floor_dark.png', 'floor_dark');
+            chargerTexture(objgl, 'enclos_floor.jpg', 'enclos_floor');
+            // 4 Cotes
+            chargerTexture(objgl, 'floor/grad_n.png', 'grad_n');
+            chargerTexture(objgl, 'floor/grad_s.png', 'grad_s');
+            chargerTexture(objgl, 'floor/grad_e.png', 'grad_e');
+            chargerTexture(objgl, 'floor/grad_w.png', 'grad_w');
+            // 4 Coins
+            chargerTexture(objgl, 'floor/grad_nw.png', 'grad_nw');
+            chargerTexture(objgl, 'floor/grad_ne.png', 'grad_ne');
+            chargerTexture(objgl, 'floor/grad_sw.png', 'grad_sw');
+            chargerTexture(objgl, 'floor/grad_se.png', 'grad_se');
+            // ombres
+            chargerTexture(objgl, 'tresorOmbre.png', 'tresorOmbre');
+            chargerTexture(objgl, 'ombreCercle.png', 'ombreCercle');
+            
+            chargerTexture(objgl, 'sky.jpg', 'sky');
+            chargerTexture(objgl, 'tresorBoite_ao.jpg', 'tresorBoite');
+            chargerTexture(objgl, 'tresorTop.png', 'tresorTop');
+            chargerTexture(objgl, 'tresorCote.jpg', 'tresorCote');
+            
+            chargerTexture(objgl, 'flecheTour.jpg', 'flecheTour');
+            chargerTexture(objgl, 'flecheBout.jpg', 'flecheBout');
+            chargerTexture(objgl, 'flechePointe.png', 'flechePointe');
+            chargerTexture(objgl, 'tlrBout.png', 'tlrBout');
+            chargerTexture(objgl, 'tlrTour.jpg', 'tlrTour');
+            chargerTexture(objgl, 'tlp.jpg', 'tlp');
+
+            
+
+            // Buffer UV factice pour les objets sans texture
+            window.dummyUVBuffer = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, window.dummyUVBuffer);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(200), objgl.STATIC_DRAW);
+
+            debuterJeu();
+
+            document.addEventListener('keydown', function (e) {
+                touchesEnfoncees[e.code] = true;
+
+                // Barre espace : ouvrir le mur
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    if ((!modeAerien || debugCull) && !partieTerminee) {
+                        ouvrirMurEnFace(objScene3D);
+                        reloadMurs();
+                    }
+                    updateHUD();
+                }
+
+                // Page Up : vue aérienne
+                if (e.code === 'PageUp') {
+                    e.preventDefault();
+                    if (!modeAerien && !partieTerminee && score >= 10) {
+                        modeAerien = true;
+                        sonOuvre.play();
+                        debugCull = false;
+                    }
+                    else{
+                        sonErreur.pause();
+                        sonErreur.currentTime = 0;
+                        sonErreur.play();
+                    }
+                }
+
+                // Page Down : retour en mode déplacement
+                if (e.code === 'PageDown') {
+                    e.preventDefault();
+                    if (modeAerien) {
+                        modeAerien = false;
+                        cooldownVueAriennePenlite = 1;
+                        sonFerme.play();
+                    }
+                }
+
+                // CTRL + SHIFT + ESPACE : triche en vue aérienne (section 5)
+                if (e.code === 'Space' && e.ctrlKey && e.shiftKey) {
+                    triche = !triche;
+                }
+            });
+
+            document.addEventListener('keyup', function (e) {
+                touchesEnfoncees[e.code] = false;
+            });
+
+            // Molette : avancer / reculer
+            objCanvas.addEventListener('wheel', function (e) {
+                e.preventDefault();
+                if ((!modeAerien || debugCull) && !partieTerminee) {
+                    var vitesse = (e.deltaY < 0 ? 1 : -1) * 0.25;
+                    deplacerJoueur(Math.sin(angleCamera) * vitesse, Math.cos(angleCamera) * vitesse, objScene3D);
+                }
+            });
+
+            // Bouton droit / gauche maintenu : tourner (section 4 - facultatif)
+            objCanvas.addEventListener('mousedown', function (e) {
+                if (e.button === 2) touchesEnfoncees['MouseRight'] = true;
+                if (e.button === 0) touchesEnfoncees['MouseLeft'] = true;
+            });
+            objCanvas.addEventListener('mouseup', function (e) {
+                touchesEnfoncees['MouseRight'] = false;
+                touchesEnfoncees['MouseLeft'] = false;
+            });
+            objCanvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+            // TODO (HUD) - initialiser l'affichage du niveau, score, ouvreurs, temps
+
+            requestAnimationFrame(function boucle(timestamp) {
+                // FPS calcul
+                if (dernierFps === 0) dernierFps = timestamp;
+
+                compteFrameFps++;
+
+                if (timestamp - dernierFps >= 1000) {
+                    fps = compteFrameFps;
+                    compteFrameFps = 0;
+                    dernierFps = timestamp;
+
+                    document.getElementById("hudFps").innerText = fps + "fps";
+                }
+
+                mettreAJourJeu(timestamp, objScene3D);
+                effacerCanevas(objgl);
+                dessiner(objgl, objProgShaders, objScene3D);
+                requestAnimationFrame(boucle);
+            });
+        }
+
+        function estVide(lig, col){
+            return tab_lab[lig][col] === CELLULE_COULOIR || tab_lab[lig][col] === CELLULE_ENCLOS;
+        }
+
+        function getBoiteFacesExternes(lig, col){
+            let faces = [];
+            if(estVide(lig + 1, col)){ faces.push(0); }
+            if(estVide(lig + -1, col)){ faces.push(1); }
+            if(estVide(lig, col + 1)){ faces.push(3); }
+            if(estVide(lig, col - 1)){ faces.push(2); }
+            return faces;
+        }
+
+        function debuterScene3D(objgl) {
+            objScene3D = new Object();
+            
+            objScene3D.tabFleches = new Array();
+            objScene3D.tabTeleporteurs = new Array();
+            objScene3D.tabTelecepteurs = new Array();
+            objScene3D.tabTresor = new Array();
+            objScene3D.tabEnnemis = new Array();
+            tabEnnemis = [];
+
+            // Plafond ( séparément car caché en vue aérienne)
+            objScene3D.plafond = creerRectangleXZ(objgl, 0, HAUTEUR_PLAFOND, 0, TAILLE_DEDALE, TAILLE_DEDALE, COULEUR_PLAFOND, 'sky');
+
+            reloadMurs();
+
+            for (var i = 0; i < tabPosFleches.length; i++) {
+                objScene3D.tabFleches.push(creerFleche(objgl, tabPosFleches[i]));
+            }
+
+            for (var i = 0; i < tabPosTeleporteurs.length; i++) {
+                objScene3D.tabTeleporteurs.push(creerTeleporteur(objgl, tabPosTeleporteurs[i]));
+            }
+
+            for (var i = 0; i < tabPosTelecepteurs.length; i++) {
+                objScene3D.tabTelecepteurs.push(creerTelecepteur(objgl, tabPosTelecepteurs[i]));
+            }
+
+            objScene3D.tabTresor.push(creerTresor(objgl, posTresor));
+        }
+
+        function getTexturesMur(lig, col, nom){
+            let tabLeft = [true, true, true, true];
+            let tabRight = [true, true, true, true];
+            let tabText = [nom + "_"];
+            try{ if(estVide(lig + 1, col + 1)){ tabRight[0] = false; tabLeft[3] = false; }}catch{}
+            try{ if(estVide(lig + 1, col - 1)){ tabLeft[0] = false; tabRight[2] = false; }}catch{}
+            try{ if(estVide(lig - 1, col + 1)){ tabLeft[1] = false; tabRight[3] = false; }}catch{}
+            try{ if(estVide(lig - 1, col - 1)){ tabRight[1] = false; tabLeft[2] = false; }}catch{}
+            for(i = 0; i < 5; i++){
+                let append = "_none";
+                if(tabLeft[i] && tabRight[i]){
+                    append = "_both";
+                }
+                else if(tabLeft[i]){
+                    append = "_left";
+                }
+                else if(tabRight[i]){
+                    append = "_right";
+                }
+                tabText.push(nom + append);
+            }
+            return tabText;
+        }
+
+        function reloadMurs(){
+            objScene3D.tabMursOuvrables = new Array();
+            objScene3D.tabObjets3D = new Array();
+
+            // Plancher
+            objScene3D.tabObjets3D.push(creerPlancher(objgl));
+
+            // Murs 
+            for (var lig = 0; lig < TAILLE_DEDALE; lig++) {
+                for (var col = 0; col < TAILLE_DEDALE; col++) {
+                    if (tab_lab[lig][col] === CELLULE_MUR_NON_OUVRABLE) {
+
+                        // Generer les faces
+                        let faces = [];
+                        if(lig == 0){ faces = [0]; }
+                        else if(lig == TAILLE_DEDALE - 1){ faces = [1]; }
+                        else if(col == 0){ faces = [3]; }
+                        else if(col == TAILLE_DEDALE - 1){ faces = [2]; }
+                        else{
+                            faces = getBoiteFacesExternes(lig, col);
+                        }
+
+                        var objet3D = creerBoite(objgl, col, 0, lig, col + 1, HAUTEUR_MUR, lig + 1, COULEUR_MUR_NON_OUVRABLE, getTexturesMur(lig, col, 'unbreakable'), faces);
+                        objet3D.ligne = lig;
+                        objet3D.col = col;
+
+                        objScene3D.tabObjets3D.push(objet3D);
+                    }
+                    else if (tab_lab[lig][col] === CELLULE_MUR_OUVRABLE) {
+                        var objet3D = creerBoite(objgl, col, 0, lig, col + 1, HAUTEUR_MUR, lig + 1, COULEUR_MUR_OUVRABLE, getTexturesMur(lig, col, 'breakable'), getBoiteFacesExternes(lig, col));
+                        objet3D.ligne = lig;
+                        objet3D.col = col;
+                        objet3D.ouvert = false;
+                        objScene3D.tabMursOuvrables.push(objet3D);
+                    }
+                }
+            }
+        }
+
+        function mettreAJourMusique(dt){
+
+            if(niveauActuel < 0){
+                try{ sonAmbActive.volume -= dt * 0.3; }
+                catch(err){ sonAmbClose.volume = 0; }
+
+                try{ sonAmbClose.volume -= dt * 0.3; }
+                catch(err){ sonAmbClose.volume = 0; }
+                
+                try{ sonAmbIdle.volume -= dt * 0.05; }
+                catch(err){ sonAmbIdle.volume = 0; }
+                return;
+            }
+
+            if(
+                ouvreurs < 2
+                || score < 100 + niveauActuel * 100
+                || tempsRestant < Math.max(niveauActuel * 5, 31)
+                || compteTeleporte > 0
+            ){
+                if(sonAmbActive.volume < 1){
+                    try{ sonAmbActive.volume += dt * 2; }
+                    catch(err){ sonAmbActive.volume = 1; }
+                }
+            }
+            else if(sonAmbActive.volume > 0){
+                try{ sonAmbActive.volume -= dt; }
+                catch(err){ sonAmbActive.volume = 0; }
+            }
+
+            if(
+                tempsRestant < Math.max(30 - ouvreurs * 10, 16)
+                || (score < 100 && tempsRestant < 30)
+            ){
+                if(sonAmbClose.volume == 0){
+                    sonAmbClose.volume = 1;
+                    sonAmbClose.currentTime = 0;
+                    sonAmbClose.play();
+                }
+                else{
+                    sonAmbClose.play();
+                    try{ sonAmbClose.volume += dt * 2; }
+                    catch(err){ sonAmbClose.volume = 1; }
+                }
+            }
+            else if(sonAmbClose.volume > 0){
+                try{ sonAmbClose.volume -= dt * 0.3; }
+                catch(err){ sonAmbClose.volume = 0; }
+            }
+
+        }
+
+        function mettreAJourFloor(){
+            if(tempsRestant <= 5.75){
+                document.querySelector("canvas").style.backgroundColor = "rgb(" + Math.floor((Math.sin(tempsRestant * Math.PI * 2) + 1) * 127.9).toString() + ", 0, 0)";
+            }
+            else if(tempsRestant <= 15.5){
+                document.querySelector("canvas").style.backgroundColor = "rgb(" + Math.floor((Math.sin(tempsRestant * Math.PI) + 1) * 100).toString() + ", 0, 0)";
+            }
+            else if(tempsRestant <= 32){
+                document.querySelector("canvas").style.backgroundColor = "rgb(" + Math.floor((Math.sin(tempsRestant * Math.PI / 2) + 1) * 50).toString() + ", 0, 0)";
+            }
+            else{
+                document.querySelector("canvas").style.backgroundColor = "rgb(0, 0, 0)";
+            }
+        }
+
+        function mettreAJourJeu(timestamp, objScene3D) {
+            var dt = (derniereTimestamp === 0) ? 0 : (timestamp - derniereTimestamp) / 1000;
+            derniereTimestamp = timestamp;
+
+            mettreAJourMusique(dt);
+            mettreAJourFloor();
+
+            if (partieTerminee) return;
+
+            let joueurX = getPositionCameraX(tabCamera);
+            let joueurZ = getPositionCameraZ(tabCamera);
+
+            for(i = 0; i < tabEnnemis.length; i++){
+                mettreAJourEnnemi(i, dt, joueurX, joueurZ);
+            }
+
+            let distanceDuTresor = Math.pow(getPositionCameraX(tabCamera) - posTresor[1] - 0.5, 2) + Math.pow(getPositionCameraZ(tabCamera) - posTresor[0] - 0.5, 2);
+            if (distanceDuTresor < 0.4 * sprint) {
+                niveauActuel += 1;
+                score += Math.floor(tempsRestant) * 10;
+                sonTresor.play();
+                debuterJeu();
+            }
+
+            for (var i = 0; i < tabPosTeleporteurs.length; i++) {
+                let pos = tabPosTeleporteurs[i];
+                let distance = Math.pow(getPositionCameraX(tabCamera) - pos[1] - 0.5, 2) + Math.pow(getPositionCameraZ(tabCamera) - pos[0] - 0.5, 2);
+                if (distance < 0.4 * sprint) {
+                    let cible = tabPosTelecepteurs[Math.floor(Math.random() * tabPosTelecepteurs.length)];
+                    debuterCamera(cible[1] + 0.5, cible[0] + 0.5);
+                    sonTeleporte.play();
+                    compteTeleporte += 1;
+                    break;
+                }
+            }
+
+            tempsRestant -= dt;
+            document.getElementById("hudTemps").innerText = Math.ceil(tempsRestant) + "s";
+
+            if (!modeAerien || debugCull) {
+                if (teleporteCooldown > 0) teleporteCooldown -= dt; // NOn utilisé
+
+                if (tempsRestant <= 0) {
+                    tempsRestant = 0;
+                    debuterJeu(true);
+                    sonMort.play();
+                }
+
+                let diff = 0;
+
+                // Déplacements continus selon les touches maintenues
+                var vitesse = VITESSE_DEPLACEMENT * dt;
+                var rotation = VITESSE_ROTATION * dt;
+                if (touchesEnfoncees['ArrowUp'] || touchesEnfoncees['KeyW']){
+                    velocite += dt * 8;
+                    if(velocite > 1){ velocite = 1; }
+                }
+                else if (touchesEnfoncees['ArrowDown'] || touchesEnfoncees['KeyS']){
+                    velocite -= dt * 6;
+                    if(velocite < -0.7){ velocite = -0.7; }
+                }
+                if(velocite > 0){
+                    velocite -= dt * 4;
+                    if(velocite < 0){ velocite = 0; }
+                }
+                else if(velocite < 0){
+                    velocite += dt * 3;
+                    if(velocite > 0){ velocite = 0; }
+                }
+                diff = deplacerJoueur(Math.sin(angleCamera) * vitesse * sprint * velocite, Math.cos(angleCamera) * vitesse * sprint * velocite, objScene3D);
+                if (touchesEnfoncees['ArrowLeft'] || touchesEnfoncees['KeyD']) tournerJoueur(rotation * sprint);
+                if (touchesEnfoncees['ArrowRight'] || touchesEnfoncees['KeyA']) tournerJoueur(-rotation * sprint);
+
+                // Pas
+
+                if(diff > 0){
+                    pasCooldown += diff * dt * 80;
+                }
+                else{
+                    if(pasCooldown > 0.5){
+                        pasCooldown += dt * 0.5;
+                    }
+                    else{
+                        pasCooldown -= dt * 0.5;
+                    }
+                }
+
+                if(pasCooldown < 0){ pasCooldown = 0; }
+                else if(pasCooldown > 1){
+                    pasCooldown = 0;
+                    pasPied = -pasPied;
+                    if(diff > 0){
+                        jouerSonPas();
+                    }
+                }
+
+                noiseTemps += dt;
+
+                // Détecter la sortie de l'enclos
+
+                var ligJoueur = Math.floor(getPositionCameraZ(tabCamera));
+                var colJoueur = Math.floor(getPositionCameraX(tabCamera));
+                if (!joueurSorti && tab_lab[ligJoueur][colJoueur] !== CELLULE_ENCLOS)
+                    joueurSorti = true;
+
+                verifierTeleportation();
+                verifierTresor(objScene3D);
+
+            } else {
+                cooldownVueAriennePenlite -= dt;
+                if (cooldownVueAriennePenlite < 0) {
+                    cooldownVueAriennePenlite = 1;
+                    score -= 10;
+                    updateHUD();
+                    if (score < 10) {
+                        modeAerien = false;
+                        sonFerme.play();
+                        sonFermeForce.play();
+                    }
+                }
+            }
+
+        }
+
+
+        function dessiner(objgl, objProgShaders, objScene3D) {
+            objgl.viewport(0, 0, objgl.drawingBufferWidth, objgl.drawingBufferHeight);
+
+            // Matrice de projection en perspective
+
+            var matProjection = mat4.create();
+            mat4.perspective(80, objgl.drawingBufferWidth / objgl.drawingBufferHeight, 0.05, 100.0, matProjection);
+            objgl.uniformMatrix4fv(objProgShaders.matProjection, false, matProjection);
+
+            // Matrice de vue (caméra)
+            var matVue = mat4.create();
+            if (modeAerien) {
+                // Vue de dessus : caméra au-dessus du centre du dédale, regarde vers le bas
+                var cx = TAILLE_DEDALE / 2, cz = TAILLE_DEDALE / 2;
+                mat4.lookAt([cx, 20, cz], [cx, 0, cz], [0, 0, -1], matVue);
+
+            } else {
+                mat4.lookAt(
+                    getPositionsCameraOffset(tabCamera, [
+                        Math.sin(pasCooldown * Math.PI) * pasPied * 0.01 + noise.perlin2(0, noiseTemps * 2) * 0.01 * sprint, 
+                        Math.sin(pasCooldown * Math.PI) * 0.02, 
+                        Math.sin(pasCooldown * Math.PI) * pasPied * 0.01 + noise.perlin2(0, noiseTemps * 2) * 0.01 * sprint
+                    ]),
+                    getCiblesCameraXYZ(tabCamera),
+                    getOrientationsOffset(tabCamera, [
+                        Math.sin(pasCooldown * Math.PI) * pasPied * 0.01 + noise.perlin2(noiseTemps, 0) * 0.005 * sprint, 
+                        noise.perlin2(noiseTemps, noiseTemps) * 0.005 * sprint, 
+                        Math.sin(pasCooldown * Math.PI) * pasPied * 0.01 + noise.perlin2(0, noiseTemps) * 0.005 * sprint
+                    ]),
+                    matVue
+                );
+            }
+
+            // Plancher + murs non-ouvrables
+            for (var i = 0; i < objScene3D.tabObjets3D.length; i++) {
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabObjets3D[i], objScene3D);
+            }
+
+            // Plafond (caché en vue aérienne pour voir l'intérieur du dédale)
+            if (!modeAerien) {
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.plafond, objScene3D);
+            }
+
+            // Murs ouvrables (seulement ceux non ouverts)
+            for (var i = 0; i < objScene3D.tabMursOuvrables.length; i++) {
+                if (!objScene3D.tabMursOuvrables[i].ouvert) {
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabMursOuvrables[i], objScene3D);
+                }
+            }
+
+            if (!modeAerien || triche) {
+                // Fleches
+                for (var i = 0; i < objScene3D.tabFleches.length; i++) {
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabFleches[i][0], objScene3D);
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabFleches[i][1], objScene3D);
+                }
+
+                // Teletransporteurs
+                for (var i = 0; i < objScene3D.tabTeleporteurs.length; i++) {
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTeleporteurs[i][0], objScene3D);
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTeleporteurs[i][1], objScene3D);
+                }
+
+                // Tele-recepteurs
+                for (var i = 0; i < objScene3D.tabTelecepteurs.length; i++) {
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTelecepteurs[i][0], objScene3D);
+                    dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTelecepteurs[i][1], objScene3D);
+                }
+
+                // Tresor
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTresor[0][0], objScene3D);
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTresor[0][1], objScene3D);
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabTresor[0][2], objScene3D);
+            }
+
+            for(i = 0; i < tabEnnemis.length; i++){
+                dessinerObjet3D(objgl, objProgShaders, matVue, objScene3D.tabEnnemis[i], objScene3D);
+            }
+
+
+            var afficherObjets = !modeAerien; // TODO triche
+
+            if (afficherObjets) {
+
+            }
+
+            // Marqueur du joueur en vue aérienne : triangle rose pointant dans la direction de la caméra
+            if (modeAerien) {
+                var px = getPositionCameraX(tabCamera);
+                var pz = getPositionCameraZ(tabCamera);
+                var ang = angleCamera;
+                var taille = 0.5;
+
+                // Pointe avant (direction regardée)
+                var ax = px + Math.sin(ang) * taille;
+                var az = pz + Math.cos(ang) * taille;
+                // Coin arrière gauche
+                var bx = px + Math.sin(ang + 2.4) * taille * 0.8;
+                var bz = pz + Math.cos(ang + 2.4) * taille * 0.8;
+                // Coin arrière droit
+                var cx = px + Math.sin(ang - 2.4) * taille * 0.8;
+                var cz = pz + Math.cos(ang - 2.4) * taille * 0.8;
+
+                var yMarqueur = 1;
+
+                var bufV = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, bufV);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array([
+                    ax, yMarqueur, az,
+                    bx, yMarqueur, bz,
+                    cx, yMarqueur, cz
+                ]), objgl.DYNAMIC_DRAW);
+
+                var rose = [1.0, 0.4, 0.7, 1.0];
+                var bufC = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, bufC);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array([
+                    rose[0], rose[1], rose[2], rose[3],
+                    rose[0], rose[1], rose[2], rose[3],
+                    rose[0], rose[1], rose[2], rose[3]
+                ]), objgl.DYNAMIC_DRAW);
+
+                // Matrice identité (coordonnées déjà en monde)
+                var matId = mat4.create();
+                mat4.set(matVue, matId);
+                objgl.uniformMatrix4fv(objProgShaders.matModeleVue, false, matId);
+
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, bufV);
+                objgl.vertexAttribPointer(objProgShaders.posVertex, 3, objgl.FLOAT, false, 0, 0);
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, bufC);
+                objgl.vertexAttribPointer(objProgShaders.couleurVertex, 4, objgl.FLOAT, false, 0, 0);
+                if (objProgShaders.texCoord >= 0)
+                    objgl.disableVertexAttribArray(objProgShaders.texCoord);
+                objgl.uniform1i(objProgShaders.useTexture, 0);
+
+                objgl.disable(objgl.CULL_FACE);
+                objgl.drawArrays(objgl.TRIANGLES, 0, 3);
+                objgl.enable(objgl.CULL_FACE);
+
+                objgl.deleteBuffer(bufV);
+                objgl.deleteBuffer(bufC);
+            }
+        }
+
+
+        // Dessine un objet3D avec la matrice de vue + transformations
+        function dessinerObjet3D(objgl, objProgShaders, matVue, objet3D, objScene3D) {
+            // Ne rien dessiner si hors champ de vision du joueur (frustum culling)
+            if (!modeAerien || debugCull) {
+                if (objet3D.ligne !== undefined && objet3D.col !== undefined) {
+
+                    const dx = (objet3D.col + 0.5) - getPositionCameraX(tabCamera);
+                    const dz = (objet3D.ligne + 0.5) - getPositionCameraZ(tabCamera);
+
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+
+                    if (distance > 1.7) {
+                        // Normalize direction to object
+                        const dirX = dx / distance;
+                        const dirZ = dz / distance;
+
+                        // Camera forward vector
+                        const forwardX = Math.sin(angleCamera);
+                        const forwardZ = Math.cos(angleCamera);
+
+                        // Dot product = cos(angle)
+                        const dot = dirX * forwardX + dirZ * forwardZ;
+
+                        const seuil = Math.cos(Math.PI / 2.5);
+
+                        if (dot < seuil) {
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Ne rien dessiner si bloqué par un mur (occlusion culling)
+            if ((!modeAerien || debugCull) && objet3D.ligne !== undefined && objet3D.col !== undefined ) {
+                var px = getPositionCameraX(tabCamera);
+                var pz = getPositionCameraZ(tabCamera);
+
+                var corners = [
+                    [objet3D.col + 0.5, objet3D.ligne + 0.5],
+                    [objet3D.col + 0, objet3D.ligne + 0],
+                    [objet3D.col + 1, objet3D.ligne + 0],
+                    [objet3D.col + 0, objet3D.ligne + 1],
+                    [objet3D.col + 1, objet3D.ligne + 1]
+                ];
+
+                var atLeastOneVisible = false;
+
+                for (var c = 0; c < 4; c++) {
+
+                    var ox = corners[c][0];
+                    var oz = corners[c][1];
+
+                    var dx = ox - px;
+                    var dz = oz - pz;
+
+                    var dist = Math.sqrt(dx * dx + dz * dz);
+
+                    var stepSize = 1;
+                    var stepX = (dx / dist) * stepSize;
+                    var stepZ = (dz / dist) * stepSize;
+
+                    var x = px;
+                    var z = pz;
+
+                    var steps = 0;
+                    var maxSteps = Math.floor(dist / stepSize) - 1;
+
+                    var blocked = false;
+
+                    while (steps < maxSteps) {
+
+                        x += stepX;
+                        z += stepZ;
+
+                        var cx = Math.floor(x);
+                        var cz = Math.floor(z);
+
+                        if (cx === Math.floor(ox) && cz === Math.floor(oz)) {
+                            break; // reached corner => visible for this ray
+                        }
+
+                        if (cz < 0 || cz >= TAILLE_DEDALE || cx < 0 || cx >= TAILLE_DEDALE) {
+                            blocked = true;
+                            break;
+                        }
+
+                        if (tab_lab[cz][cx] === CELLULE_MUR_NON_OUVRABLE) {
+                            blocked = true;
+                            break;
+                        }
+
+                        if (tab_lab[cz][cx] === CELLULE_MUR_OUVRABLE) {
+                            var murBloque = true;
+
+                            for (var i = 0; i < objScene3D.tabMursOuvrables.length; i++) {
+                                var m = objScene3D.tabMursOuvrables[i];
+                                if (m.ligne === cz && m.col === cx) {
+                                    murBloque = !m.ouvert;
+                                    break;
+                                }
+                            }
+
+                            if (murBloque) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+
+                        steps++;
+                    }
+
+                    if (!blocked) {
+                        atLeastOneVisible = true;
+                        break;
+                    }
+                }
+
+                if (!atLeastOneVisible) return;
+            }
+
+            var matModeleVue = mat4.create();
+            mat4.set(matVue, matModeleVue);
+            mat4.translate(matModeleVue, getPositionsXYZ(objet3D.transformations));
+            mat4.scale(matModeleVue, getEchellesXYZ(objet3D.transformations));
+            mat4.rotateX(matModeleVue, getAngleX(objet3D.transformations) * Math.PI / 180);
+            mat4.rotateY(matModeleVue, getAngleY(objet3D.transformations) * Math.PI / 180);
+            mat4.rotateZ(matModeleVue, getAngleZ(objet3D.transformations) * Math.PI / 180);
+            objgl.uniformMatrix4fv(objProgShaders.matModeleVue, false, matModeleVue);
+
+            if (objet3D.maillage == null) {
+                for (var j = 0; j < objet3D.vertex.length; j++) {
+                    objgl.bindBuffer(objgl.ARRAY_BUFFER, objet3D.vertex[j]);
+                    objgl.vertexAttribPointer(objProgShaders.posVertex, 3, objgl.FLOAT, false, 0, 0);
+                    // Calculer intNbVertex ICI pendant que le vertex buffer est encore lié
+                    var intNbVertex = (objgl.getBufferParameter(objgl.ARRAY_BUFFER, objgl.BUFFER_SIZE) / 4) / 3;
+
+                    objgl.bindBuffer(objgl.ARRAY_BUFFER, objet3D.couleurs[j]);
+                    objgl.vertexAttribPointer(objProgShaders.couleurVertex, 4, objgl.FLOAT, false, 0, 0);
+
+                    // Texture : seulement si chargée (loaded flag) et UV disponibles
+                    var texKey = (objet3D.textureKeys && objet3D.textureKeys[j]) ? objet3D.textureKeys[j] : null;
+                    var tex = (texKey && textures[texKey] && textures[texKey].loaded) ? textures[texKey] : null;
+                    if (tex && objet3D.uvCoords && objet3D.uvCoords[j] && objProgShaders.texCoord >= 0) {
+                        objgl.enableVertexAttribArray(objProgShaders.texCoord);
+                        objgl.bindBuffer(objgl.ARRAY_BUFFER, objet3D.uvCoords[j]);
+                        objgl.vertexAttribPointer(objProgShaders.texCoord, 2, objgl.FLOAT, false, 0, 0);
+                        objgl.activeTexture(objgl.TEXTURE0);
+                        objgl.bindTexture(objgl.TEXTURE_2D, tex);
+                        objgl.uniform1i(objProgShaders.uTexture, 0);
+                        objgl.uniform1i(objProgShaders.useTexture, 1);
+                    } else {
+                        if (objProgShaders.texCoord >= 0)
+                            objgl.disableVertexAttribArray(objProgShaders.texCoord);
+                        objgl.uniform1i(objProgShaders.useTexture, 0);
+                    }
+
+                    objgl.drawArrays(objet3D.vertex[j].typeDessin, 0, intNbVertex);
+
+                    if (tex) {
+                        objgl.bindTexture(objgl.TEXTURE_2D, null);
+                        objgl.uniform1i(objProgShaders.useTexture, 0);
+                    }
+                }
+            } else {
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, objet3D.vertex);
+                objgl.vertexAttribPointer(objProgShaders.posVertex, 3, objgl.FLOAT, false, 0, 0);
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, objet3D.couleurs);
+                objgl.vertexAttribPointer(objProgShaders.couleurVertex, 4, objgl.FLOAT, false, 0, 0);
+                if (objProgShaders.texCoord >= 0)
+                    objgl.disableVertexAttribArray(objProgShaders.texCoord);
+                objgl.uniform1i(objProgShaders.useTexture, 0);
+                objgl.bindBuffer(objgl.ELEMENT_ARRAY_BUFFER, objet3D.maillage);
+                objgl.drawElements(objgl.TRIANGLES, objet3D.maillage.intNbTriangles * 3, objgl.UNSIGNED_SHORT, 0);
+                objgl.drawElements(objgl.LINES, objet3D.maillage.intNbDroites * 2, objgl.UNSIGNED_SHORT, objet3D.maillage.intNbTriangles * 2 * 3);
+            }
+        }
+
+        function effacerCanevas(objgl) {
+            objgl.clearColor(0.0, 0.0, 0.0, 1.0);
+            objgl.clear(objgl.COLOR_BUFFER_BIT | objgl.DEPTH_BUFFER_BIT);
+        }
+
+        // CRÉATION DES OBJETS 3D
+
+
+        function creerModel(objModel, pos = [0,0,0], rot = [0,0,0], ech = [1,1,1]) {
+            if (!objModel) return null;
+
+            const instance = new Object();
+            
+            // On lie les buffers de l'objet chargé (référence partagée)
+            instance.vertex = objModel.vertex;
+            instance.couleurs = objModel.couleurs;
+            instance.uvCoords = objModel.uvCoords;
+            instance.textureKeys = objModel.textureKeys;
+            instance.maillage = objModel.maillage;
+
+            // Création des transformations spécifiques à CETTE instance[cite: 3]
+            instance.transformations = creerTransformations();
+            
+            // Application de la position[cite: 1, 2]
+            setPositionsXYZ(pos, instance.transformations);
+            
+            // Application de la rotation (en degrés)
+            setAngleX(rot[0], instance.transformations);
+            setAngleY(rot[1], instance.transformations);
+            setAngleZ(rot[2], instance.transformations);
+            
+            // Application de la mise à l'échelle
+            setEchellesXYZ(ech, instance.transformations);
+
+            return instance;
+        }
+
+
+
+        // Crée le plancher
+        function creerPlancher(objgl) {
+            let batches = {};
+            // 1 Base, 4 Cardinals, 4 Corner Bloobs
+            let sufs = ['enclos_floor', 'floor_', 'floor_dark', 'grad_n', 'grad_s', 'grad_e', 'grad_w', 'grad_nw', 'grad_ne', 'grad_sw', 'grad_se'];
+            
+            sufs.forEach(s => batches[s] = { v: [], c: [], u: [] });
+            batches['enclos'] = { v: [], c: [], u: [] };
+
+            for (var lig = 0; lig < TAILLE_DEDALE; lig++) {
+                for (var col = 0; col < TAILLE_DEDALE; col++) {
+                    
+                    // 1. SKIP IF TILE IS NOT EMPTY (Optimization)
+                    if (tab_lab[lig][col] === CELLULE_MUR_NON_OUVRABLE || tab_lab[lig][col] === CELLULE_MUR_OUVRABLE) {
+                        addLayer(batches['floor_dark'], col, lig, 0, COULEUR_PLANCHER_COULOIR);
+                        continue; 
+                    }
+
+                    // 2. ENCLOS CHECK
+                    if (tab_lab[lig][col] === CELLULE_ENCLOS) {
+                        addLayer(batches['enclos_floor'], col, lig, 0, COULEUR_PLANCHER_ENCLOS);
+                    }
+                    else{
+                        // 3. BASE FLOOR (Plain floor for corridors)
+                        addLayer(batches['floor_'], col, lig, 0, COULEUR_PLANCHER_COULOIR);
+                    }
+
+                    
+                    // 4. CARDINAL AO (Check North, South, East, West)
+                    let n = estMur(lig - 1, col, objScene3D);
+                    let s = estMur(lig + 1, col, objScene3D);
+                    let e = estMur(lig, col + 1, objScene3D);
+                    let w = estMur(lig, col - 1, objScene3D);
+
+                    if (n) addLayer(batches['grad_n'], col, lig, 0.001, [1,1,1,1]);
+                    if (s) addLayer(batches['grad_s'], col, lig, 0.001, [1,1,1,1]);
+                    if (e) addLayer(batches['grad_e'], col, lig, 0.001, [1,1,1,1]);
+                    if (w) addLayer(batches['grad_w'], col, lig, 0.001, [1,1,1,1]);
+
+                    // 5. SMART CORNER AO (The "!" Fix)
+                    // We only check diagonal walls if the cardinal sides are empty
+                    if (!n && !w && estMur(lig - 1, col - 1, objScene3D)) addLayer(batches['grad_nw'], col, lig, 0.001, [1,1,1,1]);
+                    if (!n && !e && estMur(lig - 1, col + 1, objScene3D)) addLayer(batches['grad_ne'], col, lig, 0.001, [1,1,1,1]);
+                    if (!s && !w && estMur(lig + 1, col - 1, objScene3D)) addLayer(batches['grad_sw'], col, lig, 0.001, [1,1,1,1]);
+                    if (!s && !e && estMur(lig + 1, col + 1, objScene3D)) addLayer(batches['grad_se'], col, lig, 0.001, [1,1,1,1]);
+                }
+            }
+
+            return finalizeFloor(objgl, batches);
+        }
+
+        // Helper to add a quad to a batch
+        function addLayer(batch, col, lig, y, coul) {
+            batch.v.push(col, y, lig, col, y, lig+1, col+1, y, lig+1, col, y, lig, col+1, y, lig+1, col+1, y, lig);
+            batch.u.push(0,0, 0,1, 1,1, 0,0, 1,1, 1,0);
+            for(let i=0; i<6; i++) batch.c.push(...coul);
+        }
+
+        function finalizeFloor(objgl, batches) {
+            var objet3D = new Object();
+            objet3D.vertex = [];
+            objet3D.couleurs = [];
+            objet3D.uvCoords = [];
+            objet3D.textureKeys = [];
+            
+            // On itère sur chaque type de texture (plain, grad_n, enclos, etc.)
+            for (var key in batches) {
+                var batch = batches[key];
+                if (batch.v.length === 0) continue;
+
+                // Création du buffer de positions
+                var vBuf = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, vBuf);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(batch.v), objgl.STATIC_DRAW);
+                vBuf.typeDessin = objgl.TRIANGLES;
+                objet3D.vertex.push(vBuf);
+
+                // Création du buffer de couleurs
+                var cBuf = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, cBuf);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(batch.c), objgl.STATIC_DRAW);
+                objet3D.couleurs.push(cBuf);
+
+                // Création du buffer UV
+                var uBuf = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, uBuf);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(batch.u), objgl.STATIC_DRAW);
+                objet3D.uvCoords.push(uBuf);
+
+                // Assignation de la clé de texture
+                // Si c'est 'plain', on utilise 'floor', sinon on utilise la clé (ex: 'grad_n')
+                if (key === 'plain') {
+                    objet3D.textureKeys.push('floor');
+                } else if (key === 'enclos') {
+                    objet3D.textureKeys.push('enclos_floor');
+                } else {
+                    objet3D.textureKeys.push(key);
+                }
+            }
+
+            objet3D.maillage = null;
+            objet3D.transformations = creerTransformations();
+            return objet3D;
+        }
+
+        // Crée un rectangle plat (plan XZ) à la hauteur y, entre (x0,z0) et (x1,z1)
+        // Utilisé pour le plafond et le marqueur du joueur 
+        function creerRectangleXZ(objgl, x0, y, z0, x1, z1, couleur, textureKey, versHaut = false) {
+            var r = couleur[0], g = couleur[1], b = couleur[2], a = couleur[3];
+            var tabVertex = new Array();
+            var tabCouleurs = new Array();
+
+            var sommets;
+            var uvCoords;
+
+            if (versHaut) {
+                // Normal points upward
+                sommets = [
+                    x0, y, z0, x1, y, z1, x1, y, z0,
+                    x0, y, z0, x0, y, z1, x1, y, z1
+                ];
+
+                uvCoords = [
+                    0, 0, 1, 1, 1, 0,
+                    0, 0, 0, 1, 1, 1
+                ];
+            } else {
+                // Normal points downward
+                sommets = [
+                    x0, y, z0, x1, y, z0, x1, y, z1,
+                    x0, y, z0, x1, y, z1, x0, y, z1
+                ];
+
+                uvCoords = [
+                    0, 0, 1, 0, 1, 1,
+                    0, 0, 1, 1, 0, 1
+                ];
+            }
+
+            tabVertex[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(sommets), objgl.STATIC_DRAW);
+            tabVertex[0].typeDessin = objgl.TRIANGLES;
+
+            var tabC = [];
+            for (var i = 0; i < 6; i++) tabC.push(r, g, b, a);
+
+            tabCouleurs[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC), objgl.STATIC_DRAW);
+
+            var uvBuf = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, uvBuf);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvCoords), objgl.STATIC_DRAW);
+
+            var objet3D = new Object();
+            objet3D.vertex = tabVertex;
+            objet3D.couleurs = tabCouleurs;
+            objet3D.uvCoords = [uvBuf];
+            objet3D.textureKeys = [textureKey || null];
+            objet3D.maillage = null;
+            objet3D.transformations = creerTransformations();
+
+            return objet3D;
+        }
+
+        // Crée une boîte (5 faces visibles) entre (x0,y0,z0) et (x1,y1,z1)
+        function creerBoite(objgl, x0, y0, z0, x1, y1, z1, couleur, textureKeys, faces = [0, 1, 2, 3]) {
+            var r = couleur[0], g = couleur[1], b = couleur[2], a = couleur[3];
+            var tabVertex = new Array();
+            var tabCouleurs = new Array();
+            var tabUV = new Array();
+
+            // 5 faces (centre + 5 sommets en TRIANGLE_FAN), la face du dessous n'est pas dessinée
+            var tabFaces = [
+                // Face dessus  (y = y1)
+                [(x0 + x1) / 2, y1, (z0 + z1) / 2, x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, x0, y1, z1]
+            ];
+            var tabKeys = [ textureKeys[0] ];
+
+            if(faces.includes(0)){ // Face avant (z = z1)
+                tabFaces.push([(x0 + x1) / 2, (y0 + y1) / 2, z1, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, x0, y0, z1]);
+                tabKeys.push( textureKeys[1] );
+            }
+            if(faces.includes(1)){ // Face arrière (z = z0)
+                tabFaces.push([(x0 + x1) / 2, (y0 + y1) / 2, z0, x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0]);
+                tabKeys.push( textureKeys[2] );
+            }
+            if(faces.includes(2)){ // Face gauche  (x = x0)
+                tabFaces.push([x0, (y0 + y1) / 2, (z0 + z1) / 2, x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, x0, y0, z0]);
+                tabKeys.push( textureKeys[3] );
+            }
+            if(faces.includes(3)){ // Face droite  (x = x1)
+                tabFaces.push([x1, (y0 + y1) / 2, (z0 + z1) / 2, x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1]);
+                tabKeys.push( textureKeys[4] );
+            }
+
+            // UV TRIANGLE_FAN: centre(0.5,0.5) + 4 coins + retour au 1er coin
+            var faceUV = [0.5, 0.5, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1];
+
+            for (var i = 0; i < tabFaces.length; i++) {
+                tabVertex[i] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[i]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabFaces[i]), objgl.STATIC_DRAW);
+                tabVertex[i].typeDessin = objgl.TRIANGLE_FAN;
+
+                var tabC = [];
+                for (var k = 0; k < 6; k++) tabC.push(r, g, b, a);
+                tabCouleurs[i] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[i]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC), objgl.STATIC_DRAW);
+
+                tabUV[i] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[i]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(faceUV), objgl.STATIC_DRAW);
+            }
+
+            var objet3D = new Object();
+            objet3D.vertex = tabVertex;
+            objet3D.couleurs = tabCouleurs;
+            objet3D.uvCoords = tabUV;
+            objet3D.textureKeys = tabKeys ? tabKeys : [null, null, null, null, null];
+            objet3D.maillage = null;
+            objet3D.transformations = creerTransformations();
+            return objet3D;
+        }
+
+
+
+
+
+        function creerCone(objgl, x, y, z, rayonBase, hauteur, dirX, dirY, dirZ, dessinerBase, couleur, textureTour, textureBase) {
+
+            var r = couleur[0], g = couleur[1], b = couleur[2], a = couleur[3];
+
+            var tabVertex = [];
+            var tabCouleurs = [];
+            var tabUV = [];
+
+            var nbSegments = 24;
+
+            // Normaliser direction
+            var len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+            if (len == 0) len = 1;
+
+            dirX /= len;
+            dirY /= len;
+            dirZ /= len;
+
+            // Pointe du cone
+            var px = x + dirX * hauteur;
+            var py = y + dirY * hauteur;
+            var pz = z + dirZ * hauteur;
+
+            // Trouver 2 vecteurs perpendiculaires à la direction
+            var ax = 0, ay = 1, az = 0;
+
+            if (Math.abs(dirY) > 0.95) {
+                ax = 1; ay = 0; az = 0;
+            }
+
+            // right = dir x axis
+            var rx = dirY * az - dirZ * ay;
+            var ry = dirZ * ax - dirX * az;
+            var rz = dirX * ay - dirY * ax;
+
+            len = Math.sqrt(rx * rx + ry * ry + rz * rz);
+            rx /= len; ry /= len; rz /= len;
+
+            // up = right x dir
+            var ux = ry * dirZ - rz * dirY;
+            var uy = rz * dirX - rx * dirZ;
+            var uz = rx * dirY - ry * dirX;
+
+            // Laterale
+            var tabSide = [];
+            var uvSide = [];
+
+            // Pointe du cone = centre top of texture
+            tabSide.push(px, py, pz);
+            uvSide.push(0.5, 1.0);
+
+            for (var i = nbSegments; i >= 0; i--) {
+
+                var ang = (i / nbSegments) * Math.PI * 2.0;
+
+                var cx = x + Math.cos(ang) * rx * rayonBase + Math.sin(ang) * ux * rayonBase;
+                var cy = y + Math.cos(ang) * ry * rayonBase + Math.sin(ang) * uy * rayonBase;
+                var cz = z + Math.cos(ang) * rz * rayonBase + Math.sin(ang) * uz * rayonBase;
+
+                tabSide.push(cx, cy, cz);
+
+                // Chaque point de base avance horizontalement
+                // ce qui déroule les triangles côte à côte
+                uvSide.push(i / nbSegments, 0.0);
+            }
+
+            tabVertex[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabSide), objgl.STATIC_DRAW);
+            tabVertex[0].typeDessin = objgl.TRIANGLE_FAN;
+
+            var tabC = [];
+            for (var i = 0; i < tabSide.length / 3; i++) {
+                tabC.push(r, g, b, a);
+            }
+
+            tabCouleurs[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC), objgl.STATIC_DRAW);
+
+            tabUV[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvSide), objgl.STATIC_DRAW);
+
+            // Base
+            if (dessinerBase) {
+                var tabBase = [];
+                var uvBase = [];
+
+                // Centre
+                tabBase.push(x, y, z);
+                uvBase.push(0.5, 0.5);
+
+                for (var i = nbSegments; i >= 0; i--) {
+                    var ang = (i / nbSegments) * Math.PI * -2.0;
+                    var cx = x + Math.cos(ang) * rx * rayonBase + Math.sin(ang) * ux * rayonBase;
+                    var cy = y + Math.cos(ang) * ry * rayonBase + Math.sin(ang) * uy * rayonBase;
+                    var cz = z + Math.cos(ang) * rz * rayonBase + Math.sin(ang) * uz * rayonBase;
+
+                    tabBase.push(cx, cy, cz);
+                    uvBase.push(
+                        0.5 + Math.cos(ang) * 0.5,
+                        0.5 + Math.sin(ang) * 0.5
+                    );
+                }
+                tabVertex[1] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[1]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabBase), objgl.STATIC_DRAW);
+                tabVertex[1].typeDessin = objgl.TRIANGLE_FAN;
+
+                tabC = [];
+                for (var i = 0; i < tabBase.length / 3; i++) {
+                    tabC.push(r, g, b, a);
+                }
+
+                tabCouleurs[1] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[1]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC), objgl.STATIC_DRAW);
+
+                tabUV[1] = objgl.createBuffer();
+                objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[1]);
+                objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvBase), objgl.STATIC_DRAW);
+            }
+
+
+
+            var objet3D = new Object();
+            objet3D.vertex = tabVertex;
+            objet3D.couleurs = tabCouleurs;
+            objet3D.maillage = null;
+            objet3D.transformations = creerTransformations();
+            objet3D.uvCoords = tabUV;
+
+            objet3D.textureKeys = [
+                textureTour || null,
+                textureBase || null
+            ];
+
+            return objet3D;
+        }
+
+
+
+
+
+
+        function creerCylindre(objgl, x, y, z, rayon, hauteur, dirX, dirY, dirZ, couleur, textureTour, textureBout) {
+            var r = couleur[0], g = couleur[1], b = couleur[2], a = couleur[3];
+
+            var tabVertex = [];
+            var tabCouleurs = [];
+            var tabUV = [];
+
+            var nbSegments = 24;
+
+            // Normaliser Dir
+            var len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+            if (len == 0) len = 1;
+
+            dirX /= len;
+            dirY /= len;
+            dirZ /= len;
+
+            // Base
+            var x2 = x + dirX * hauteur;
+            var y2 = y + dirY * hauteur;
+            var z2 = z + dirZ * hauteur;
+
+            // Axis Perpendiculaire
+            var ax = 0, ay = 1, az = 0;
+
+            if (Math.abs(dirY) > 0.95) {
+                ax = 1; ay = 0; az = 0;
+            }
+
+            var rx = dirY * az - dirZ * ay;
+            var ry = dirZ * ax - dirX * az;
+            var rz = dirX * ay - dirY * ax;
+
+            len = Math.sqrt(rx * rx + ry * ry + rz * rz);
+            rx /= len; ry /= len; rz /= len;
+
+            var ux = ry * dirZ - rz * dirY;
+            var uy = rz * dirX - rx * dirZ;
+            var uz = rx * dirY - ry * dirX;
+
+            // Cote
+            var tabSide = [];
+            var uvSide = [];
+
+            for (var i = 0; i <= nbSegments; i++) {
+
+                var ang = (i / nbSegments) * Math.PI * 2;
+
+                var cos = Math.cos(ang);
+                var sin = Math.sin(ang);
+
+                var vx = cos * rx * rayon + sin * ux * rayon;
+                var vy = cos * ry * rayon + sin * uy * rayon;
+                var vz = cos * rz * rayon + sin * uz * rayon;
+
+                // bas
+                tabSide.push( x + vx, y + vy, z + vz );
+
+                uvSide.push(i / nbSegments, 0);
+
+                // haut
+                tabSide.push( x2 + vx, y2 + vy, z2 + vz );
+
+                uvSide.push(i / nbSegments, 1);
+            }
+
+            tabVertex[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabSide), objgl.STATIC_DRAW);
+            tabVertex[0].typeDessin = objgl.TRIANGLE_STRIP;
+
+            var tabC = [];
+            for (var i = 0; i < tabSide.length / 3; i++) {
+                tabC.push(r, g, b, a);
+            }
+
+            tabCouleurs[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC), objgl.STATIC_DRAW);
+
+            tabUV[0] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[0]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvSide), objgl.STATIC_DRAW);
+
+            // Base 1
+            var tabBase1 = [];
+            var uvBase1 = [];
+
+            // Centre
+            tabBase1.push(x, y, z);
+            uvBase1.push(0.5, 0.5);
+
+            for (var i = 0; i <= nbSegments; i++) {
+
+                var ang = (i / nbSegments) * Math.PI * 2;
+
+                var cos = Math.cos(ang);
+                var sin = Math.sin(ang);
+
+                var cx = x + cos * rx * rayon + sin * ux * rayon;
+                var cy = y + cos * ry * rayon + sin * uy * rayon;
+                var cz = z + cos * rz * rayon + sin * uz * rayon;
+
+                tabBase1.push(cx, cy, cz);
+
+                // UV circulaire dans un carré
+                uvBase1.push(
+                    0.5 + cos * 0.5,
+                    0.5 + sin * 0.5
+                );
+            }
+
+            tabVertex[1] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[1]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabBase1), objgl.STATIC_DRAW);
+            tabVertex[1].typeDessin = objgl.TRIANGLE_FAN;
+
+            var tabC1 = [];
+            for (var i = 0; i < tabBase1.length / 3; i++) {
+                tabC1.push(r, g, b, a);
+            }
+
+            tabCouleurs[1] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[1]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC1), objgl.STATIC_DRAW);
+
+            tabUV[1] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[1]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvBase1), objgl.STATIC_DRAW);
+
+            // Base 2
+            var tabBase2 = [];
+            var uvBase2 = [];
+
+            // Centre
+            tabBase2.push(x2, y2, z2);
+            uvBase2.push(0.5, 0.5);
+
+            for (var i = nbSegments; i >= 0; i--) {
+
+                var ang = (i / nbSegments) * Math.PI * 2;
+
+                var cos = Math.cos(ang);
+                var sin = Math.sin(ang);
+
+                var cx = x2 + cos * rx * rayon + sin * ux * rayon;
+                var cy = y2 + cos * ry * rayon + sin * uy * rayon;
+                var cz = z2 + cos * rz * rayon + sin * uz * rayon;
+
+                tabBase2.push(cx, cy, cz);
+
+                // UV circulaire dans un carré
+                uvBase2.push(
+                    0.5 + cos * 0.5,
+                    0.5 + sin * 0.5
+                );
+            }
+
+            tabVertex[2] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabVertex[2]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabBase2), objgl.STATIC_DRAW);
+            tabVertex[2].typeDessin = objgl.TRIANGLE_FAN;
+
+            var tabC2 = [];
+            for (var i = 0; i < tabBase2.length / 3; i++) {
+                tabC2.push(r, g, b, a);
+            }
+
+            tabCouleurs[2] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabCouleurs[2]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(tabC2), objgl.STATIC_DRAW);
+
+            tabUV[2] = objgl.createBuffer();
+            objgl.bindBuffer(objgl.ARRAY_BUFFER, tabUV[2]);
+            objgl.bufferData(objgl.ARRAY_BUFFER, new Float32Array(uvBase2), objgl.STATIC_DRAW);
+
+            // =========================
+            var objet3D = new Object();
+            objet3D.vertex = tabVertex;
+            objet3D.couleurs = tabCouleurs;
+            objet3D.uvCoords = tabUV;
+
+            objet3D.textureKeys = [
+                textureTour || null,
+                textureBout || null,
+                textureBout || null
+            ];
+
+            objet3D.maillage = null;
+            objet3D.transformations = creerTransformations();
+
+            return objet3D;
+        }
+
+
+
+
+
+
+
+
+        function creerFleche(objgl, pos) {
+            let col = pos[1];
+            let lig = pos[0];
+            var objCone = creerCone(
+                objgl, col + 0.5, 1.5, lig + 0.5, 0.2, 0.5,
+                posTresor[1] - col,
+                0,
+                posTresor[0] - lig,
+                true, COULEUR_FLECHES_CONE, 'flechePointe', 'flecheBout'
+            );
+
+            objCone.ligne = lig;
+            objCone.col = col;
+            objCone.type = "fleche";
+
+            var obj = creerCylindre(
+                objgl, col + 0.5, 1.5, lig + 0.5, 0.1, 0.5,
+                col - posTresor[1],
+                0,
+                lig - posTresor[0],
+                COULEUR_FLECHES_CYLINDRE, 'flecheTour', 'flecheBout'
+            );
+
+            obj.ligne = lig;
+            obj.col = col;
+            obj.type = "fleche";
+
+
+
+            return [objCone, obj];
+        }
+
+        function creerTeleporteur(objgl, pos) {
+            let col = pos[1];
+            let lig = pos[0];
+            var obj = creerCone(
+                objgl, col + 0.5, 0, lig + 0.5, 0.3, 0.4,
+                0,
+                1,
+                0,
+                false, COULEUR_TELETRANSPORTEUR, 'tlp'
+            );
+
+            obj.ligne = lig;
+            obj.col = col;
+            obj.type = "teleporteur";
+
+            var objOmbre = creerRectangleXZ(
+                objgl, col, 0.01, lig, col + 1, lig + 1, [1, 1, 1, 1], 'ombreCercle', true
+            )
+
+            objOmbre.ligne = lig;
+            objOmbre.col = col;
+            objOmbre.type = 'teleporteur';
+
+            return [obj, objOmbre];
+        }
+
+        function creerTelecepteur(objgl, pos) {
+            let col = pos[1];
+            let lig = pos[0];
+            var obj = creerCylindre(
+                objgl, col + 0.5, 0, lig + 0.5, 0.3, 0.1,
+                0,
+                1,
+                0,
+                COULEUR_TELERECEPTEUR, 'tlrTour', 'tlrBout'
+            );
+
+            obj.ligne = lig;
+            obj.col = col;
+            obj.type = "telecepteur";
+
+            var objOmbre = creerRectangleXZ(
+                objgl, col, 0.01, lig, col + 1, lig + 1, [1, 1, 1, 1], 'ombreCercle', true
+            )
+
+            objOmbre.ligne = lig;
+            objOmbre.col = col;
+            objOmbre.type = 'telecepteur';
+
+            return [obj, objOmbre];
+        }
+
+        function creerTresor(objgl, pos) {
+            let col = pos[1];
+            let lig = pos[0];
+            var objBoite = creerBoite(
+                objgl,
+                col + 0.3, 0,
+                lig + 0.15,
+                col + 0.7, 0.4,
+                lig + 0.85,
+                COULEUR_TRESOR_BOITE, ['tresorBoite', 'tresorBoite', 'tresorBoite', 'tresorBoite', 'tresorBoite']
+            );
+
+            objBoite.ligne = lig;
+            objBoite.col = col;
+            objBoite.type = "tresor";
+
+            var objCylindre = creerCylindre(
+                objgl, col + 0.5, 0.4, lig + 0.1504, 0.2, 0.696,
+                0,
+                0,
+                1,
+                COULEUR_TRESOR_COUVERCLE, 'tresorTop', 'tresorCote'
+            );
+
+            objCylindre.ligne = lig;
+            objCylindre.col = col;
+            objCylindre.type = "tresor";
+
+            var objOmbre = creerRectangleXZ(
+                objgl, col, 0.01, lig, col + 1, lig + 1, [1, 1, 1, 1], 'tresorOmbre', true
+            )
+
+            objOmbre.ligne = lig;
+            objOmbre.col = col;
+            objOmbre.type = 'tresor';
+
+            return [objBoite, objCylindre, objOmbre];
+        }
+
+        // CAMÉRA DU JOUEUR
+
+        function debuterCamera(startX, startZ) {
+            // Le joueur démarre au centre de l'enclos (cols 15-19, lignes 13-17)
+            //var startX = TAILLE_DEDALE / 2;  // 15.5
+            //var startZ = TAILLE_DEDALE / 2;  // 15.5
+            angleCamera = Math.PI;           // regarde vers -Z (nord)
+
+            tabCamera = creerCamera();
+            setPositionCameraX(startX, tabCamera);
+            setPositionCameraY(HAUTEUR_CAMERA, tabCamera);
+            setPositionCameraZ(startZ, tabCamera);
+            setCibleCameraX(startX + Math.sin(angleCamera), tabCamera);
+            setCibleCameraY(HAUTEUR_CAMERA, tabCamera);
+            setCibleCameraZ(startZ + Math.cos(angleCamera), tabCamera);
+            setOrientationX(0, tabCamera);
+            setOrientationY(1, tabCamera);
+            setOrientationZ(0, tabCamera);
+        }
+
+        function mettreAJourCible() {
+            setCibleCameraX(getPositionCameraX(tabCamera) + Math.sin(angleCamera), tabCamera);
+            setCibleCameraZ(getPositionCameraZ(tabCamera) + Math.cos(angleCamera), tabCamera);
+        }
+
+        // DÉPLACEMENTS DU JOUEUR
+
+        // Retourne vrai si la cellule (lig, col) est un obstacle solide
+        function estMur(lig, col, objScene3D) {
+            if (lig < 0 || lig >= TAILLE_DEDALE || col < 0 || col >= TAILLE_DEDALE) return true;
+            if (tab_lab[lig][col] === CELLULE_MUR_NON_OUVRABLE) return true;
+            if (tab_lab[lig][col] === CELLULE_MUR_OUVRABLE) {
+                for (var i = 0; i < objScene3D.tabMursOuvrables.length; i++) {
+                    if (objScene3D.tabMursOuvrables[i].ligne === lig && objScene3D.tabMursOuvrables[i].col === col)
+                        return !objScene3D.tabMursOuvrables[i].ouvert;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Tente de déplacer le joueur de (dx, dz), avec détection de collision
+        function deplacerJoueur(dx, dz, objScene3D) {
+            dernierPosX = getPositionCameraX(tabCamera);
+            dernierPosZ = getPositionCameraZ(tabCamera);
+            
+            let nx = dernierPosX + dx;
+            let nz = dernierPosZ + dz;
+
+            let px = nx;
+            let pz = nz;
+
+            
+
+            let radius = RAYON_COLLISION;
+
+            function solide(lig, col) {
+                return estMur(lig, col, objScene3D);
+            }
+
+            // Sur le X
+            let testX = px;
+
+            let left = Math.floor(testX - radius);
+            let right = Math.floor(testX + radius);
+            let top = Math.floor(pz);
+            let bottom = Math.floor(pz);
+
+            if (solide(bottom, right) || solide(top, right)) {
+                testX = right - radius - 0.0001;
+            }
+
+            if (solide(bottom, left) || solide(top, left)) {
+                testX = left + 1 + radius + 0.0001;
+            }
+
+            px = testX;
+
+            // Sur le Z
+            let testZ = pz;
+
+            left = Math.floor(px);
+            right = Math.floor(px);
+            top = Math.floor(testZ - radius);
+            bottom = Math.floor(testZ + radius);
+
+            if (solide(bottom, left) || solide(bottom, right)) {
+                testZ = bottom - radius - 0.0001;
+            }
+
+            if (solide(top, left) || solide(top, right)) {
+                testZ = top + 1 + radius + 0.0001;
+            }
+
+            pz = testZ;
+
+            // Corner Collision
+            let cornerX = Math.round(px);
+            let cornerZ = Math.round(pz);
+
+            let cornerSolid =
+                solide(cornerZ - 1, cornerX - 1) ||
+                solide(cornerZ - 1, cornerX) ||
+                solide(cornerZ, cornerX - 1) ||
+                solide(cornerZ, cornerX);
+
+            if (cornerSolid) {
+
+                // Vector from corner to player
+                let vx = px - cornerX;
+                let vz = pz - cornerZ;
+
+                let dist = Math.sqrt(vx * vx + vz * vz);
+
+                // If inside collision radius
+                if (dist < radius) {
+
+                    // Avoid divide-by-zero
+                    if (dist < 0.0001) {
+                        vx = 1;
+                        vz = 0;
+                        dist = 1;
+                    }
+
+                    // Normalize
+                    vx /= dist;
+                    vz /= dist;
+
+                    // Push player exactly to radius
+                    px = cornerX + vx * radius;
+                    pz = cornerZ + vz * radius;
+                }
+            }
+
+            // Deplacement
+            if (joueurSorti &&
+                tab_lab[Math.floor(pz)] &&
+                tab_lab[Math.floor(pz)][Math.floor(px)] === CELLULE_ENCLOS) {
+                return;
+            }
+
+            // Appliquer pas
+            let diffX = px - dernierPosX;
+            let diffZ = pz - dernierPosZ;
+
+            // Appliquer
+            let deltaCibX = getCibleCameraX(tabCamera) - getPositionCameraX(tabCamera);
+            let deltaCibZ = getCibleCameraZ(tabCamera) - getPositionCameraZ(tabCamera);
+
+            setPositionCameraX(px, tabCamera);
+            setPositionCameraZ(pz, tabCamera);
+
+            setCibleCameraX(px + deltaCibX, tabCamera);
+            setCibleCameraZ(pz + deltaCibZ, tabCamera);
+
+            return Math.sqrt(diffX * diffX + diffZ * diffZ);
+        }
+
+        function tournerJoueur(dAngle) {
+            angleCamera += dAngle;
+            mettreAJourCible();
+        }
+
+        // OUVERTURE DE MUR
+
+        function ouvrirMurEnFace(objScene3D) {
+            var faceLig = Math.floor(getPositionCameraZ(tabCamera) + Math.cos(angleCamera) * 0.75);
+            var faceCol = Math.floor(getPositionCameraX(tabCamera) + Math.sin(angleCamera) * 0.75);
+
+            if (tab_lab[faceLig] && tab_lab[faceLig][faceCol] === CELLULE_MUR_OUVRABLE) {
+                if (ouvreurs <= 0 || score < 50){
+                    sonErreur.pause();
+                    sonErreur.currentTime = 0;
+                    sonErreur.play();
+                    return;
+                }
+                for (var i = 0; i < objScene3D.tabMursOuvrables.length; i++) {
+                    var mur = objScene3D.tabMursOuvrables[i];
+                    if (mur.ligne === faceLig && mur.col === faceCol && !mur.ouvert) {
+                        mur.ouvert = true;
+                        tab_lab[faceLig][faceCol] = CELLULE_COULOIR;
+                        ouvreurs--;
+                        score -= 50;
+                        sonBrise.pause();
+                        sonBrise.currentTime = 0;
+                        sonBrise.play();
+                        return;
+                    }
+                }
+            }
+        }
+
+        // TÉLÉPORTATION
+
+        function verifierTeleportation() {
+        }
+
+        // DÉTECTION DU TRÉSOR
+
+        function verifierTresor(objScene3D) {
+        }
+
+        // GESTION DES NIVEAUX
+
+
+    </script>
+</body>
+
+</html>
